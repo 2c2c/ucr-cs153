@@ -86,11 +86,22 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
+  struct thread *current_thread = thread_current ();
+  //allocate a generic list element, childthread element for iterating through all children of current_thread
+
+  //iterate through the childthread list in current thread, stop when finding matching tid 
+
+  // return -1 if entire for loop runs with no matching tid
+
+  //check if matched child is already waiting, if not, set it to waiting, otherwise return -1
+
+  //check if child is done, if it is remove from childlist and return its code from exit()
+
+  //until complete return -1
   return -1;
 }
-
 /* Free the current process's resources. */
 void
 process_exit (void)
@@ -206,7 +217,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (const char *cmd_line, void (**eip) (void), void **esp) 
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -222,12 +233,26 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+
+  //used internally by strtok_r which has to be used for thread safety
+  char *strtok_holder;
+  
+  //maybe malloc instead
+  char *page = palloc_get_page (0);
+  if (page == NULL)
+  {
+    return TID_ERROR;
+  }
+  strlcpy (page, cmd_line, PGSIZE);
+  //first token = program to run
+  char *program = strtok_r(page, " ", &strtok_holder);
+  file = filesys_open (program);
   if (file == NULL) 
-    {
-      printf ("load: %s: open failed\n", file_name);
+  {
+      printf ("load: %s: open failed\n", cmd_line);
       goto done; 
-    }
+  }
+  palloc_free_page(page);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -238,7 +263,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: error loading executable\n", cmd_line);
       goto done; 
     }
 
@@ -304,6 +329,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+
+
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
