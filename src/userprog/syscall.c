@@ -42,16 +42,7 @@ static void seek (int fd, unsigned position);
 static unsigned tell (int fd);
 static void close (int fd);
 
-
-static struct 
-user_file 
-{
-  struct file *file;
-  fid_t fid;
-  struct list_elem thread_elem;
-};
-
-//static struct *get_file(int fid);
+static struct file_helper* get_file(int fid);
 
 static void syscall_handler (struct intr_frame *);
 
@@ -199,7 +190,7 @@ static int
 open (const char *file)
 {
   struct file *sysfile;
-  struct user_file *ufile;
+  struct file_helper *ufile;
 
   if (sysfile == NULL)
     return -1;
@@ -212,7 +203,7 @@ open (const char *file)
   if (sysfile == NULL)
     return -1;
 
-  ufile = (struct user_file *) malloc (sizeof (struct user_file));
+  ufile = (struct file_helper *) malloc (sizeof (struct file_helper));
   if (ufile == NULL)
     {
       file_close (file);
@@ -224,7 +215,7 @@ open (const char *file)
   //global_fid is static global var that handles allocation of fids
   ufile->fid = global_fid;
   global_fid++;
-  //add the user_file struct to the list of user_files in the current thread
+  //add the file_helper struct to the list of file_helpers in the current thread
   lock_release (&flock);
 
   return ufile->fid;
@@ -233,12 +224,13 @@ open (const char *file)
 static int
 filesize (int fd)
 {
-  struct user_file *ufile;	
+  struct file_helper *ufile;	
   int size = -1;
-  //getfile
-  //f = get_file (fd);
+  ufile = get_file (fd);
   if (ufile == NULL)
+  {
     return -1;
+  }
 
   lock_acquire (&flock);
   size = file_length (ufile->file);
@@ -250,7 +242,7 @@ filesize (int fd)
 static int
 read (int fd, void *buffer, unsigned length)
 {
-  struct user_file *ufile;
+  struct file_helper *ufile;
   int read_status = -1;
 
   lock_acquire (&flock);
@@ -277,7 +269,7 @@ read (int fd, void *buffer, unsigned length)
   else
     {
       //return 
-      //ufile = get_file (fd);
+      ufile = get_file (fd);
       if (ufile == NULL)
         read_status = -1;
       else
@@ -291,7 +283,7 @@ read (int fd, void *buffer, unsigned length)
 static int
 write (int fd, const void *buffer, unsigned length)
 {
-  struct user_file *ufile;
+  struct file_helper *ufile;
   int write_status = -1;
 
   lock_acquire (&flock);
@@ -309,7 +301,7 @@ write (int fd, const void *buffer, unsigned length)
     }
   else
     {
-//      ufile = get_file (fd);
+     ufile = get_file (fd);
       if (ufile == NULL)
       {
         write_status = -1;
@@ -327,9 +319,9 @@ write (int fd, const void *buffer, unsigned length)
 static void
 seek (int fd, unsigned position)
 {
-  struct user_file *ufile;
+  struct file_helper *ufile;
 
-//  ufile = get_file (fd);
+  ufile = get_file (fd);
   if (!ufile)
     exit (-1);
 
@@ -341,11 +333,11 @@ seek (int fd, unsigned position)
 static unsigned
 tell (int fd)
 {
-  struct user_file *ufile;
+  struct file_helper *ufile;
 
   unsigned int tell_status;
 
-//  ufile = get_file (fd);
+  ufile = get_file (fd);
   if (!ufile)
   {
     exit (-1);
@@ -360,37 +352,35 @@ tell (int fd)
 static void
 close (int fd)
 {
-  struct user_file *ufile;
+  struct file_helper *ufile;
 
-//  ufile = get_file (fd);
+  ufile = get_file (fd);
 
   if (ufile == NULL)
     exit (-1);
 
   lock_acquire (&flock);
-  list_remove (&ufile->thread_elem);
-  file_close (ufile->file);
+  list_remove (&ufile -> elem);
+  file_close (ufile -> file);
   free (ufile);
   lock_release (&flock);
 }
 
-//static struct user_file *
-//get_file (int fid)
-//{
-//  struct list_elem *e;
-//  struct thread *t;
-//
-//  t = thread_current();
-//  for (e = list_begin (&t->files); e != list_end (&t->files);
-//       e = list_next (e))
-//    {
-//      struct user_file *f = list_entry (e, struct user_file, thread_elem);
-//      if (f->fid == fid)
-//        return f;
-//    }
-//
-//  return NULL;
-//}
+static struct file_helper *
+get_file (int fid)
+{
+  struct list_elem *e;
+  struct thread *t;
+
+  t = thread_current();
+  for (e = list_begin (&t->owned_files); e != list_end (&t->owned_files); e = list_next (e))
+    {
+      struct file_helper *fh = list_entry (e, struct file_helper, elem);
+      if (fh->fid == fid)
+        return fh;
+    }
+  return NULL;
+}
 
 
 //read 4 bytes from memory

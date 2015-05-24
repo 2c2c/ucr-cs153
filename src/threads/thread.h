@@ -80,6 +80,25 @@ typedef int tid_t;
    only because they are mutually exclusive: only a thread in the
    ready state is on the run queue, whereas only a thread in the
    blocked state is on a semaphore wait list. */
+
+struct 
+file_helper 
+{
+  struct file *file;
+  tid_t fid;
+  struct list_elem elem;
+};
+
+struct
+child
+{
+  tid_t pid;
+  bool is_waiting;
+  bool is_fin;
+  int return_value;
+  struct list_elem elem;
+};
+
 struct thread
   {
     /* Owned by thread.c. */
@@ -99,6 +118,12 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    //remove if unneeded**
+    tid_t parent_tid;
+    int loaded;
+    struct file *bin;
+    struct list children;
+    struct list owned_files;
 #endif
 
     /* Owned by thread.c. */
@@ -145,5 +170,7 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void add_thread_to_ready (struct thread *iThread);
+
+struct thread * get_thread(tid_t tid);
 
 #endif /* threads/thread.h */

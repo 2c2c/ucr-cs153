@@ -4,6 +4,7 @@
 #include <round.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <list.h>
 #include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
@@ -17,32 +18,88 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 
+//semaphore used EVERYWHERE in proc.c
+static struct semaphore sema;
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
-   thread id, or TID_ERROR if the thread cannot be created. */
+   thread id, or TID_ERROR if the thread cannot be created.*/
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *cmd_line) 
 {
-  char *fn_copy;
-  tid_t tid;
+  // passed into thread create
+    char *copy;
+    // used for strtok which mangles contents
+    char *copy2;
+    struct thread *ct = thread_current();
+    struct child *child = palloc_get_page(0);
 
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
-    return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+    copy = palloc_get_page(0);
+    if (copy == NULL)
+        return TID_ERROR;
+    strlcpy(copy, cmd_line, PGSIZE);
+    
+    copy2 = palloc_get_page(0);
+    if (copy2 == NULL)
+    {
+        return TID_ERROR;
+    }
+    strlcpy (copy2, cmd_line, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
-  return tid;
+    char *strtok_holder;
+    char *process_name = strtok_r(copy2, " ", &strtok_holder);
+    
+    //init 0?
+    sema_init(&sema, 1);
+    sema_down(&sema);
+
+    /* Create a new thread to execute cmd_line. */
+    //tid returned in future child
+    tid_t tid = thread_create (process_name, PRI_DEFAULT, start_process, copy);
+    
+    sema_down(&sema);
+    sema_up(&sema);
+
+    struct thread *child_thread = get_thread (tid);
+    thread_unblock (child_thread);
+    //comes from load ()
+    if (!child_thread -> loaded)
+    {
+      return -1;
+    }
+    
+    struct file *file = filesys_open (process_name);
+    if (file == NULL)
+     {
+       return -1;
+     }
+    //built in file locks from filesys folder
+    file_deny_write(file);
+    
+    //setup child struct
+    //completing then adding to curernt thread's children list
+    child -> pid = tid;
+    child -> return_value = -1;
+    child -> is_fin = false;
+    child -> is_waiting = false;
+
+
+    list_push_back (&(ct -> children), &(child -> elem));
+    child_thread -> parent_tid = ct -> tid;
+    child_thread -> bin = file;
+    
+    palloc_free_page (copy2);
+    
+    if (tid == TID_ERROR)
+      {
+        palloc_free_page(copy); 
+      }
+    return tid;
 }
 
 /* A thread function that loads a user process and starts it
@@ -50,30 +107,42 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
-  char *file_name = file_name_;
-  struct intr_frame if_;
-  bool success;
+    char *process = file_name_;
+    struct intr_frame if_;
+    bool success;
 
-  /* Initialize interrupt frame and load executable. */
-  memset (&if_, 0, sizeof if_);
-  if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
-  if_.cs = SEL_UCSEG;
-  if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+    /* Initialize interrupt frame and load executable. */
+    memset (&if_, 0, sizeof(if_));
+    if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+    if_.cs = SEL_UCSEG;
+    if_.eflags = FLAG_IF | FLAG_MBS;
+    success = load (process, &if_.eip, &if_.esp);
+    
+    //load () return value tells whether thread load was good or not
+    thread_current () -> loaded = success;
+    sema_up (&sema);
+    intr_disable ();
+    thread_block ();
+    intr_enable ();
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+   //finished loading cmdline, cleanup
+    palloc_free_page(0);
 
-  /* Start the user process by simulating a return from an
-     interrupt, implemented by intr_exit (in
-     threads/intr-stubs.S).  Because intr_exit takes all of its
-     arguments on the stack in the form of a `struct intr_frame',
-     we just point the stack pointer (%esp) to our stack frame
-     and jump to it. */
-  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
-  NOT_REACHED ();
+    /* If load failed, quit. */
+    palloc_free_page (process);
+    if (!success)
+    {
+        thread_exit ();
+    }
+
+    /* Start the user process by simulating a return from an
+       interrupt, implemented by intr_exit (in
+       threads/intr-stubs.S).  Because intr_exit takes all of its
+       arguments on the stack in the form of a `struct intr_frame',
+       we just point the stack pointer (%esp) to our stack frame
+       and jump to it. */
+    asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
+    NOT_REACHED();
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -234,10 +303,7 @@ load (const char *cmd_line, void (**eip) (void), void **esp)
 
   /* Open executable file. */
 
-  //used internally by strtok_r which has to be used for thread safety
   char *strtok_holder;
-  
-  //maybe malloc instead
   char *page = palloc_get_page (0);
   if (page == NULL)
   {
