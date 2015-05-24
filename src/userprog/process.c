@@ -20,10 +20,16 @@
 #include "threads/vaddr.h"
 #include "threads/synch.h"
 
+//for stack helper
+#define ARGV_DELIMIT " "
+#define MAX_ARGV 50
+
 //semaphore used EVERYWHERE in proc.c
 static struct semaphore sema;
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static void * push (uint8_t *kpage, size_t *ofs, const void *buf, size_t size);
+static bool setup_stack_helper (const char * cmd_line, uint8_t * kpage, uint8_t * upage, void ** esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -555,4 +561,86 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+
+//## You should really understand how this code works so you know how to use it!
+//## Read through it carefully.
+//## push (kpage, &ofs, &x, sizeof x), kpage is created in setup_stack....
+//## x is all the values argv, argc, and null (you need a null on the stack!)
+//## Be careful of hte order of argv! Check the stack example
+
+/* Pushes the SIZE bytes in BUF onto the stack in KPAGE, whose
+ *   page-relative stack pointer is *OFS, and then adjusts *OFS
+ *   appropriately.  The bytes pushed are rounded to a 32-bit
+ *   boundary.
+ * 
+ *   If successful, returns a pointer to the newly pushed object.
+ *   On failure, returns a null pointer. */
+static void *
+push (uint8_t *kpage, size_t *ofs, const void *buf, size_t size) 
+{
+  size_t padsize = ROUND_UP (size, sizeof (uint32_t));
+  if (*ofs < padsize){
+    return NULL;
+  }
+  *ofs -= padsize;
+  memcpy (kpage + *ofs + (padsize - size), buf, size);
+  return kpage + *ofs + (padsize - size);
+}
+
+
+static bool
+setup_stack_helper (const char * cmd_line, uint8_t * kpage, uint8_t * upage, void ** esp) 
+{
+  size_t ofs = PGSIZE; //##Used in push!
+  char * const null = NULL; //##Used for pushing nulls
+  char * cmd_copy; //Used because cmd_line is a const char * and strtok_r modifies its inputs
+  char *SavePtr; //##strtok_r usage
+  char *argc [MAX_ARGV];
+  //##Probably need some other variables here as well...
+
+  //##Parse and put in command line arguments, push each value
+  //##if any push() returns NULL, return false
+  argc[0] = strtok_r (cmd_copy, ARGV_DELIMIT, SavePtr);
+  int i = 1;
+  int num_argv = 1;
+  for (i = 1; i < MAX_ARGV; i++)
+  {
+    argc[i] = strtok_r (null, ARGV_DELIMIT, SavePtr);
+    if (argc[i] == 0 || argc[i] == "")
+    {
+      num_argv = i; 
+      i = MAX_ARGV - 1;
+    }
+  }
+
+  //##push() a null (more precisely &null).
+  //##if push returned NULL, return false
+  if (!push (kpage, &ofs, &null, sizeof &null))
+    return false;
+
+  //##Push argv addresses (i.e. for the cmd_line added above) in reverse order
+  //##See the stack example on documentation for what "reversed" means
+  //##Push argc, how can we determine argc?
+  //##Push &null
+  //##Should you check for NULL returns?
+  i = num_argv;
+  for (; i >= 0; i--)
+  {
+    push (kpage, &ofs, argc[i], sizeof *(argc[i]));
+  }
+  i = num_argv;
+  for (; i >= 0; i--)
+  {
+    push (kpage, &ofs, argc + i, sizeof argc);
+  }
+  push (kpage, &ofs, &num_argv, sizeof num_argv);
+  *esp = push (kpage, &ofs, &null, sizeof &null);
+
+  //##Set the stack pointer. IMPORTANT! Make sure you use the right value here...
+  //*esp = upage + ofs;
+
+  //##If you made it this far, everything seems good, return true
+  return true;
 }
