@@ -1,4 +1,4 @@
-#include <stdlib.h>
+#include "devices/timer.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
@@ -7,7 +7,6 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
-#include "devices/timer.h"
   
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -18,12 +17,8 @@
 #error TIMER_FREQ <= 1000 recommended
 #endif
 
-/* List of processes to be awaken after a certain interval */
-static struct list timer_block_list;
-
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
-struct lock  timer_list_lock;
 
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
@@ -35,59 +30,6 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
-/* Creates a thread_timer object, which is used to keep track of ticks
-   that a thread needs before it wakes up. */
-struct thread_timer 
-*create_timer (struct thread* i_thread, int64_t ticks)
-{
-  struct thread_timer *new_timer = malloc (sizeof (struct thread_timer));
-  ASSERT (new_timer != NULL);
-  
-  new_timer->sleeping_thread = i_thread;
-  new_timer->ticks = ticks;
-  new_timer->start = timer_ticks ();
-  return new_timer;
-}
-
-bool 
-compare_timer_ticks (const struct list_elem *lhs, const struct list_elem *rhs, void *aux UNUSED)
-{
-  const struct thread_timer *a = list_entry (lhs, struct thread_timer, elem);
-  const struct thread_timer *b = list_entry (rhs, struct thread_timer, elem);
-  
-  if ( (a->ticks - timer_elapsed(a->start)) < (b->ticks - timer_elapsed(b->start)))
-    return true;
-  else
-    return false;
-}
-
-/* Destroy a thread timer. The thread will not be touched. */
-void 
-destroy_thread_timer (struct thread_timer* timer)
-{
-  ASSERT (timer != NULL);
-  free (timer);
-}
-
-/* checks (current tick - thread's tick upon creation) > (amt of ticks to run)
-   returns false if threadlist empty  */
-bool
-thread_sleeptime_up(void)
-{
-  return !list_empty (&timer_block_list) &&
-            timer_elapsed (list_entry (list_front (&timer_block_list), struct thread_timer, elem) -> start) >= 
-            list_entry (list_front (&timer_block_list), struct thread_timer, elem) -> ticks;
-}
-/* Checks to see if there any threads to wake up */
-void 
-check_sleeping_threads (void)
-{
-  while (thread_sleeptime_up())
-  {
-    thread_unblock ((list_entry (list_pop_front (&timer_block_list), struct thread_timer, elem)) -> sleeping_thread);
-  }
-}
-
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -95,8 +37,6 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
-  list_init (&timer_block_list);
-  lock_init (&timer_list_lock);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -150,19 +90,10 @@ void
 timer_sleep (int64_t ticks) 
 {
   int64_t start = timer_ticks ();
-  ASSERT (intr_get_level () == INTR_ON);
-  enum intr_level old_level = intr_disable();
-  struct thread_timer *new_timer = create_timer (thread_current (), ticks);
 
-  if (list_empty (&timer_block_list))
-     list_push_front (&timer_block_list, &new_timer->elem);
-  else
-  {
-     list_insert_ordered (&timer_block_list, &new_timer->elem, 
-			 &compare_timer_ticks, NULL); 
-  }
-  thread_block ();
-  intr_set_level (old_level);
+  ASSERT (intr_get_level () == INTR_ON);
+  while (timer_elapsed (start) < ticks) 
+    thread_yield ();
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -241,7 +172,6 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
-  check_sleeping_threads ();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
