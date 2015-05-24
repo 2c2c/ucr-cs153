@@ -55,8 +55,16 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *frame) 
 {
+  struct thread *t = thread_current();
+  if (frame -> esp == NULL ||
+      !is_user_vaddr (frame -> esp) ||
+       pagedir_get_page (t->pagedir, frame -> esp) == NULL
+      )
+  {
+    exit (-1);
+  }
+
   int syscall = read_address (frame -> esp);
-  //printf("\nsyscall: %d\n",syscall);
   
   if (syscall == SYS_HALT)
   {
