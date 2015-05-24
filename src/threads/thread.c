@@ -559,6 +559,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  //userprog
+  list_init(&t->owned_files);
+  list_init(&t->children);
   list_init (&t->sema_list);
   list_init (&t->lock_list);
   list_push_back (&all_list, &t->allelem);

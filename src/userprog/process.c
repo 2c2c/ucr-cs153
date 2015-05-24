@@ -19,6 +19,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "threads/malloc.h"
 
 //for stack helper
 #define ARGV_DELIMIT " "
@@ -43,7 +44,8 @@ process_execute (const char *cmd_line)
     // used for strtok which mangles contents
     char *copy2;
     struct thread *ct = thread_current();
-    struct child *child = palloc_get_page(0);
+
+    struct child *child = malloc (sizeof (struct child));
 
     copy = palloc_get_page(0);
     if (copy == NULL)
@@ -322,7 +324,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, const char *cmd_line);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -440,7 +442,7 @@ load (const char *cmd_line, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, cmd_line))
     goto done;
 
 
@@ -566,8 +568,9 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
+//passing cmd_line thru setup_stack is most convenient way to get to helper without making an extra copy of hte ocmmand line.
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, const char *cmd_line)
 {
   uint8_t *kpage;
   bool success = false;
@@ -577,7 +580,10 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE;
+      {
+	return setup_stack_helper(cmd_line, kpage, ((uint8_t *) PHYS_BASE) - PGSIZE, esp);
+        //*esp = PHYS_BASE;
+      }
       else
         palloc_free_page (kpage);
     }
@@ -636,31 +642,44 @@ setup_stack_helper (const char * cmd_line, uint8_t * kpage, uint8_t * upage, voi
 {
   size_t ofs = PGSIZE; //##Used in push!
   char * const null = NULL; //##Used for pushing nulls
-  char * cmd_copy; //Used because cmd_line is a const char * and strtok_r modifies its inputs
+  char * cmd_copy = malloc (strlen(cmd_line)+2);; //Used because cmd_line is a const char * and strtok_r modifies its inputs
   char *SavePtr; //##strtok_r usage
-  char *argc [MAX_ARGV];
+  char *argc[MAX_ARGV];
   //##Probably need some other variables here as well...
+  //
+  //
+  //
 
+   strlcpy(cmd_copy, cmd_line, strlen(cmd_line)+2);
   //##Parse and put in command line arguments, push each value
   //##if any push() returns NULL, return false
-  argc[0] = strtok_r (cmd_copy, ARGV_DELIMIT, SavePtr);
-  int i = 1;
+  int i = 0;
   int num_argv = 1;
-  for (i = 1; i < MAX_ARGV; i++)
+  for (i = 0; i < MAX_ARGV; i++)
   {
-    argc[i] = strtok_r (null, ARGV_DELIMIT, SavePtr);
-    if (argc[i] == 0 || argc[i] == "")
+    printf(cmd_copy);
+    argc[i] = strtok_r (cmd_copy, " ", &SavePtr);
+    if (argc[i] == 0)
     {
-      num_argv = i; 
-      i = MAX_ARGV - 1;
+      break;
+    }
+    else if (argc[i] == "")
+    {
+	//push a null
+	break;
+    }
+    else
+    {
+      num_argv = i + 1; 
+      printf(argc[i]);
     }
   }
 
   //##push() a null (more precisely &null).
   //##if push returned NULL, return false
-  if (!push (kpage, &ofs, &null, sizeof &null))
-    return false;
-
+//  if (!push (kpage, &ofs, &null, sizeof &null))
+//    return false;
+//
   //##Push argv addresses (i.e. for the cmd_line added above) in reverse order
   //##See the stack example on documentation for what "reversed" means
   //##Push argc, how can we determine argc?
