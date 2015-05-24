@@ -49,7 +49,9 @@ process_execute (const char *cmd_line)
 
     copy = palloc_get_page(0);
     if (copy == NULL)
+    {
         return TID_ERROR;
+    }
     strlcpy(copy, cmd_line, PGSIZE);
     
     copy2 = palloc_get_page(0);
@@ -61,8 +63,9 @@ process_execute (const char *cmd_line)
 
     char *strtok_holder;
     char *process_name = strtok_r(copy2, " ", &strtok_holder);
-    
-    //init 0?
+
+    //printf("\nproc_exec: %s\n",process_name); 
+
     sema_init(&sema, 1);
     sema_down(&sema);
 
@@ -70,17 +73,18 @@ process_execute (const char *cmd_line)
     //tid returned in future child
     tid_t tid = thread_create (process_name, PRI_DEFAULT, start_process, copy);
     
+    //printf("\nproc_exec: %s\n",process_name); 
     sema_down(&sema);
     sema_up(&sema);
 
     struct thread *child_thread = get_thread (tid);
     thread_unblock (child_thread);
-    //comes from load ()
     if (!child_thread -> loaded)
     {
       return -1;
     }
     
+    //printf("\nproc_exec: %s\n",process_name); 
     struct file *file = filesys_open (process_name);
     if (file == NULL)
      {
@@ -89,6 +93,7 @@ process_execute (const char *cmd_line)
     //built in file locks from filesys folder
     file_deny_write(file);
     
+    //printf("\nproc_exec: %s\n",process_name); 
     //setup child struct
     //completing then adding to curernt thread's children list
     child -> pid = tid;
@@ -100,7 +105,9 @@ process_execute (const char *cmd_line)
     list_push_back (&(ct -> children), &(child -> elem));
     child_thread -> parent_tid = ct -> tid;
     child_thread -> bin = file;
+    strlcpy(child_thread -> name, process_name, 16);
     
+    //printf("\nproc_exec: %s\n",process_name); 
     palloc_free_page (copy2);
     
     if (tid == TID_ERROR)
@@ -124,8 +131,10 @@ start_process (void *file_name_)
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
+
     success = load (process, &if_.eip, &if_.esp);
     
+    //printf("\nload: %d \n",success);
     //load () return value tells whether thread load was good or not
     thread_current () -> loaded = success;
     sema_up (&sema);
@@ -133,6 +142,8 @@ start_process (void *file_name_)
     thread_block ();
     intr_enable ();
 
+    //printf("\nunblocks \n");
+    //load () return value tells whether thread load was good or not
    //finished loading cmdline, cleanup
     palloc_free_page(0);
 
@@ -143,6 +154,7 @@ start_process (void *file_name_)
         thread_exit ();
     }
 
+    //printf("\nstart_proc end\n");
     /* Start the user process by simulating a return from an
        interrupt, implemented by intr_exit (in
        threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -360,11 +372,11 @@ load (const char *cmd_line, void (**eip) (void), void **esp)
   }
   strlcpy (page, cmd_line, PGSIZE);
   //first token = program to run
-  char *program = strtok_r(page, " ", &strtok_holder);
+  char *program = strtok_r (page, " ", &strtok_holder);
   file = filesys_open (program);
   if (file == NULL) 
   {
-      printf ("load: %s: open failed\n", cmd_line);
+      //printf ("load: %s: open failed\n", cmd_line);
       goto done; 
   }
   palloc_free_page(page);
@@ -378,7 +390,7 @@ load (const char *cmd_line, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", cmd_line);
+      //printf ("load: %s: error loading executable\n", cmd_line);
       goto done; 
     }
 
@@ -442,14 +454,12 @@ load (const char *cmd_line, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
+
   if (!setup_stack (esp, cmd_line))
     goto done;
 
-
-
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
-
   success = true;
 
  done:
@@ -636,7 +646,6 @@ push (uint8_t *kpage, size_t *ofs, const void *buf, size_t size)
   return kpage + *ofs + (padsize - size);
 }
 
-
 static bool
 setup_stack_helper (const char * cmd_line, uint8_t * kpage, uint8_t * upage, void ** esp) 
 {
@@ -675,21 +684,8 @@ setup_stack_helper (const char * cmd_line, uint8_t * kpage, uint8_t * upage, voi
 
   argv = (char **) (upage + ofs);
   
-  int i;  
-  for (i = 0; i < argc; i++)
-  {
-    if(argv[i] != NULL)
-    {
-      printf(arg[i]);
-      printf("\n\n");
-    }
-    else
-    {
-      break;
-    }
-  }
-
   //palindrome style
+  int i;  
   for (i = 0; i < argc/2; i++)
   {
     char * temp = argv[i];
@@ -717,6 +713,5 @@ setup_stack_helper (const char * cmd_line, uint8_t * kpage, uint8_t * upage, voi
 
   
   //##If you made it this far, everything seems good, return true
-
   return true;  
 }

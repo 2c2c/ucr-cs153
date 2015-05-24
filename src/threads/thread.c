@@ -95,9 +95,6 @@ thread_init (void)
   
   list_init (&ready_list);
   list_init (&all_list);
-  //for userprog
-  list_init(&t->owned_files);
-  list_init(&t->children);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -215,8 +212,6 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
-  thread_yield_priority ();
-  
   return tid;
 }
 
@@ -352,10 +347,7 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  lock_acquire (&thread_set_priority_lock);
   thread_current ()->priority = new_priority;
-  lock_release (&thread_set_priority_lock);
-  thread_yield_priority ();
 }
 
 /* Returns the current thread's priority. */
@@ -480,6 +472,11 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  //for userprog
+  list_init(&t->owned_files);
+  list_init(&t->children);
+
+
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
@@ -597,3 +594,21 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+
+//searches through the global list of threads and returns the first (and hopefully only..) thread with matching member tid
+//no thread found returns null
+struct thread *
+get_thread (tid_t tid) 
+{
+  struct list_elem *e;
+  for (e = list_begin(&all_list);e != list_end(&all_list);e = list_next(e))
+  {
+    struct thread *t = list_entry(e, struct thread, allelem);
+    if (t->tid == tid)
+    {
+      return t;
+    }
+  }
+  return NULL;
+}
