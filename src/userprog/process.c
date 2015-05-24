@@ -581,7 +581,7 @@ setup_stack (void **esp, const char *cmd_line)
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
       {
-	return setup_stack_helper(cmd_line, kpage, ((uint8_t *) PHYS_BASE) - PGSIZE, esp);
+        return setup_stack_helper(cmd_line, kpage, ((uint8_t *) PHYS_BASE) - PGSIZE, esp);
         //*esp = PHYS_BASE;
       }
       else
@@ -642,65 +642,81 @@ setup_stack_helper (const char * cmd_line, uint8_t * kpage, uint8_t * upage, voi
 {
   size_t ofs = PGSIZE; //##Used in push!
   char * const null = NULL; //##Used for pushing nulls
-  char * cmd_copy = malloc (strlen(cmd_line)+2);; //Used because cmd_line is a const char * and strtok_r modifies its inputs
-  char *SavePtr; //##strtok_r usage
-  char *argc[MAX_ARGV];
+  char *strtok_holder; //##strtok_r usage
   //##Probably need some other variables here as well...
-  //
-  //
-  //
+  char **argv;
+  int argc = 0;
 
-   strlcpy(cmd_copy, cmd_line, strlen(cmd_line)+2);
   //##Parse and put in command line arguments, push each value
   //##if any push() returns NULL, return false
-  int i = 0;
-  int num_argv = 1;
-  for (i = 0; i < MAX_ARGV; i++)
+  //strlen doesnt include \0
+  char * cmd_copy = push (kpage, &ofs, cmd_line, strlen(cmd_line)+1);
+  if (cmd_copy == NULL)
   {
-    printf(cmd_copy);
-    argc[i] = strtok_r (cmd_copy, " ", &SavePtr);
-    if (argc[i] == 0)
+    return false;
+  }
+  //##push() a null (more precisely &null).
+  //##if push returned NULL, return false
+  if (push (kpage, &ofs, &null, sizeof(null)) == NULL)
+  {
+    return false;
+  }
+  char * token = strtok_r (cmd_copy, " ", &strtok_holder);
+  while (token != NULL)
+  {
+    void *cur_uarg = upage + (token - (char *) kpage);
+    if (push (kpage, &ofs, &cur_uarg, sizeof (cur_uarg)) == NULL)
     {
-      break;
+      return false;
     }
-    else if (argc[i] == "")
+    argc++;
+    token = strtok_r(NULL, " ", &strtok_holder);
+  }  
+
+  argv = (char **) (upage + ofs);
+  
+  for (i = 0; i < argc; i++)
+  {
+    if(arg[i] != NULL)
     {
-	//push a null
-	break;
+      printf(arg[i]);
+      printf("\n\n");
     }
     else
     {
-      num_argv = i + 1; 
-      printf(argc[i]);
+      break;
     }
   }
 
-  //##push() a null (more precisely &null).
-  //##if push returned NULL, return false
-//  if (!push (kpage, &ofs, &null, sizeof &null))
-//    return false;
-//
+  int i;  
+  //palindrome style
+  for (i = 0; i < argc/2; i++)
+  {
+    char * temp = argv[i];
+    int counterpart = argc - i - 1;
+    argv[i] = argv[counterpart];
+    argv[counterpart] = temp;
+  }
+
+
   //##Push argv addresses (i.e. for the cmd_line added above) in reverse order
   //##See the stack example on documentation for what "reversed" means
+  if (push (kpage, &ofs, &argv, sizeof (argv)) == NULL)
+    return false;
+
   //##Push argc, how can we determine argc?
+  if (push (kpage, &ofs, &argc, sizeof (argc)) == NULL)
+    return false;
   //##Push &null
+  if (push (kpage, &ofs, &null, sizeof (null)) == NULL)
+    return false;
   //##Should you check for NULL returns?
-  i = num_argv;
-  for (; i >= 0; i--)
-  {
-    push (kpage, &ofs, argc[i], sizeof *(argc[i]));
-  }
-  i = num_argv;
-  for (; i >= 0; i--)
-  {
-    push (kpage, &ofs, argc + i, sizeof argc);
-  }
-  push (kpage, &ofs, &num_argv, sizeof num_argv);
-  *esp = push (kpage, &ofs, &null, sizeof &null);
 
   //##Set the stack pointer. IMPORTANT! Make sure you use the right value here...
-  //*esp = upage + ofs;
+  *esp = upage + ofs;
 
+  
   //##If you made it this far, everything seems good, return true
-  return true;
+
+  return true;  
 }
