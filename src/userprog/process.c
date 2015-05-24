@@ -675,9 +675,10 @@ setup_stack_helper (const char * cmd_line, uint8_t * kpage, uint8_t * upage, voi
 
   argv = (char **) (upage + ofs);
   
+  int i;  
   for (i = 0; i < argc; i++)
   {
-    if(arg[i] != NULL)
+    if(argv[i] != NULL)
     {
       printf(arg[i]);
       printf("\n\n");
@@ -688,7 +689,6 @@ setup_stack_helper (const char * cmd_line, uint8_t * kpage, uint8_t * upage, voi
     }
   }
 
-  int i;  
   //palindrome style
   for (i = 0; i < argc/2; i++)
   {
