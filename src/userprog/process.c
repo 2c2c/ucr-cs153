@@ -165,18 +165,59 @@ process_wait (tid_t child_tid)
 {
   struct thread *current_thread = thread_current ();
   //allocate a generic list element, childthread element for iterating through all children of current_thread
-
+  struct thread *ct = thread_current ();
+  struct list_elem *e = list_begin (& (ct -> children));
+  struct child *target;
   //iterate through the childthread list in current thread, stop when finding matching tid 
 
+  bool found = false;
+  while (e != list_end (&(ct->children)))
+  {
+    struct child *C = list_entry(e, struct child, elem);
+    if (C->pid == child_tid)
+    {
+      target = C;
+      found = true;
+      break;
+    }
+    e = list_next (e);
+  }
   // return -1 if entire for loop runs with no matching tid
+  if(!found)
+  {
+    return -1;
+  }
 
   //check if matched child is already waiting, if not, set it to waiting, otherwise return -1
-
+  if (!target -> is_waiting)
+  {
+    target -> is_waiting = true;
+  }
+  else
+  {
+    return -1;
+  }
   //check if child is done, if it is remove from childlist and return its code from exit()
-
-  //until complete return -1
-  return -1;
+  if (target -> is_fin)
+  {
+    list_remove(&(target -> elem));
+    int status = target -> return_value;
+    palloc_free_page(target);
+    return status;
+    }
+    //block till finished
+  else
+  {
+    intr_disable ();
+    thread_block ();
+    intr_enable ();
+  }
+  //remove since guaranteed fin
+  list_remove (&(target -> elem));
+  //palloc_free
+  return target -> return_value;
 }
+
 /* Free the current process's resources. */
 void
 process_exit (void)
