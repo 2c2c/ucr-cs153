@@ -44,6 +44,7 @@ static void close (int fd);
 static struct file_helper* get_file(int fid);
 
 static void syscall_handler (struct intr_frame *);
+static bool safe_ptr (const void *ptr);
 
 void
 syscall_init (void) 
@@ -55,14 +56,6 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *frame) 
 {
-  struct thread *t = thread_current();
-  if (frame -> esp == NULL ||
-      !is_user_vaddr (frame -> esp) ||
-       pagedir_get_page (t->pagedir, frame -> esp) == NULL
-      )
-  {
-    exit (-1);
-  }
 
   int syscall = read_address (frame -> esp);
   
@@ -468,7 +461,7 @@ get_file (int fid)
 //NEEDS TO BE BUG TESTED, bits might be in backwards order
 static int
 read_address(const void * address) {
-  if(address >= PHYS_BASE) 
+  if (!safe_ptr(address))
   {
      exit (-1); 
   }
@@ -518,3 +511,23 @@ put_user (uint8_t *udst, uint8_t byte)
   return error_code != -1;
 }
 
+//general pointer safety function
+//design doc B3 answer
+static bool
+safe_ptr (const void *p)
+{
+  struct thread *ct = thread_current();
+  if (p == NULL  ||
+      !is_user_vaddr (p) ||
+      pagedir_get_page (ct -> pagedir, p) == NULL
+     )
+  {
+    //redundantly going to exit in caller functions as well for safety
+    exit (-1);
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
