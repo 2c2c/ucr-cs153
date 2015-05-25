@@ -206,6 +206,8 @@ exit (int status)
 static pid_t
 exec (const char *cmd_line)
 {
+  if (!safe_ptr(cmd_line))
+     exit (-1); 
   //lock_acquire (&flock);
   int exec_status  = process_execute (cmd_line);
   //lock_release (&flock);
@@ -224,8 +226,8 @@ wait (pid_t pid)
 static bool
 create (const char *file, unsigned initial_size)
 {
-  if (file == NULL)
-    exit (-1);
+  if (!safe_ptr(file))
+     exit (-1); 
   //lock_acquire (&flock);
   int create_status = filesys_create (file, initial_size);
   //lock_release (&flock);
@@ -235,8 +237,8 @@ create (const char *file, unsigned initial_size)
 static bool
 remove (const char *file)
 {
-   if (file == NULL)
-     exit (-1);
+  if (!safe_ptr(file))
+     exit (-1); 
    //lock_acquire (&flock);
    bool remove_status = filesys_remove (file);
    //lock_release (&flock);
@@ -246,6 +248,8 @@ remove (const char *file)
 static int
 open (const char *file)
 {
+  if (!safe_ptr(file))
+     exit (-1); 
   struct file *sysfile;
   struct file_helper *ufile;
 
@@ -307,6 +311,8 @@ filesize (int fd)
 static int
 read (int fd, void *buffer, unsigned length)
 {
+  if (!safe_ptr(buffer))
+     exit (-1); 
   struct file_helper *ufile;
   int read_status = -1;
 
@@ -347,6 +353,8 @@ read (int fd, void *buffer, unsigned length)
 static int
 write (int fd, const void *buffer, unsigned length)
 {
+  if (!safe_ptr(buffer))
+     exit (-1); 
   struct file_helper *ufile;
   int write_status = -1;
 
