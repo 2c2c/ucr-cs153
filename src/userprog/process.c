@@ -359,7 +359,10 @@ load (const char *cmd_line, void (**eip) (void), void **esp)
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
+  {
+    printf ("load: %s: open failed\n", cmd_line);
     goto done;
+  }
   process_activate ();
 
   /* Open executable file. */
@@ -390,7 +393,7 @@ load (const char *cmd_line, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      //printf ("load: %s: error loading executable\n", cmd_line);
+      printf ("load: %s: error loading executable\n", cmd_line);
       goto done; 
     }
 

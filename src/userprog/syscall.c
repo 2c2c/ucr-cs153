@@ -40,16 +40,30 @@ static int write (int fd, const void *buffer, unsigned size);
 static void seek (int fd, unsigned position);
 static unsigned tell (int fd);
 static void close (int fd);
-
+void soft_lock(void);
+void soft_release(void);
 static struct file_helper* get_file(int fid);
 
 static void syscall_handler (struct intr_frame *);
 static bool safe_ptr (const void *ptr);
 
 void
+soft_lock (void)
+{
+  if (!lock_held_by_current_thread (&flock))
+    lock_acquire (&flock);
+}
+
+void
+soft_release (void)
+{
+  if (lock_held_by_current_thread (&flock))
+    lock_release (&flock);
+}
+void
 syscall_init (void) 
 {
-  //lock_init(&flock);
+  lock_init(&flock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -58,17 +72,15 @@ syscall_handler (struct intr_frame *frame)
 {
 
   int syscall = read_address (frame -> esp);
+  //printf("\nsyscall: %d\n", syscall);
   
   if (syscall == SYS_HALT)
   {
     halt();
-    PANIC("halt");
   }
   else if (syscall == SYS_EXIT)
   {
-    //printf("sysexit\n");
     exit (read_address(frame -> esp + 4));
-    PANIC("exit");
   }
   else if (syscall == SYS_EXEC)
   {
@@ -142,27 +154,26 @@ exit (int status)
   //REQUIRED output
   printf("%s: exit(%d)\n", thread_current()->name, status);
 
- // if (lock_held_by_current_thread (&flock) )
- // {
- //     lock_release (&flock);
- // }
+  soft_release ();
 
   //while the list of files a thread owns is NOT empty
   //iterate through each entry and run close() on said file
   struct list_elem * f;
   while (!list_empty (&(t->owned_files)))
   {
-   // printf("\nowned files list\n");
     f = list_begin (&(t->owned_files));
     fid_t fd = (list_entry (f, struct file_helper, elem))-> fid;
+    //printf("close %d\n",fd);
     close (fd); 
   }
 
   //close file assoc with current thread
   if (t->bin != NULL)
   {
+    soft_lock ();
     file_allow_write (t->bin);
     file_close (t->bin);
+    soft_release();
   }
 
   //list of children
@@ -199,7 +210,6 @@ exit (int status)
   //set thread's return status
   t -> loaded = status;
   
- // printf("\nin exit past itr, %d \n",status);
   thread_exit ();
 }
 
@@ -207,13 +217,11 @@ static pid_t
 exec (const char *cmd_line)
 {
   if (!safe_ptr(cmd_line))
-     exit (-1); 
-  //lock_acquire (&flock);
+     return (-1); 
+  soft_lock ();
   int exec_status  = process_execute (cmd_line);
-  //lock_release (&flock);
+  soft_release ();
 
-  //printf("\n exec: %s\n",cmd_line);
-  //printf("\n exec: %d\n",exec_status);
   return exec_status;
 }
 
@@ -227,10 +235,10 @@ static bool
 create (const char *file, unsigned initial_size)
 {
   if (!safe_ptr(file))
-     exit (-1); 
-  //lock_acquire (&flock);
-  int create_status = filesys_create (file, initial_size);
-  //lock_release (&flock);
+     return false; 
+  soft_lock ();
+  bool create_status = filesys_create (file, initial_size);
+  soft_release ();
   return create_status;
 }
 
@@ -238,10 +246,10 @@ static bool
 remove (const char *file)
 {
   if (!safe_ptr(file))
-     exit (-1); 
-   //lock_acquire (&flock);
+     return false; 
+   soft_lock ();
    bool remove_status = filesys_remove (file);
-   //lock_release (&flock);
+   soft_release ();
    return remove_status;
 }
 
@@ -249,43 +257,41 @@ static int
 open (const char *file)
 {
   if (!safe_ptr(file))
-     exit (-1); 
-  struct file *sysfile;
+     return -1; 
+
+  soft_lock ();
+  struct file *file_o;
   struct file_helper *ufile;
 
-  if (file == NULL)
-{
+  file_o = filesys_open (file);
+  //file DNE case
+  if (file_o == NULL)
+  {
+    //printf("hello\n");
+    soft_release ();
     return -1;
-}
-
-  //printf("\nopen:  %s \n",file);
-
-  //lock_acquire (&flock);
-  sysfile = filesys_open (file);
-  //lock_release (&flock);
-
-  //if failed to open
-  if (sysfile == NULL)
-    return -1;
+  }
 
   ufile = (struct file_helper *) malloc (sizeof (struct file_helper));
+  //allocation error
   if (ufile == NULL)
-    {
-      file_close (sysfile);
+  {
+      filesys_remove (file_o);
+      soft_release ();
       return -1;
-    }
+  }
+  //printf("HOW, %s", file);
 
   //setup file_helper and push onto thread's list of owned files
-  //lock_acquire (&flock);
-  ufile->file = file;
+  ufile->file = file_o;
   //global_fid is static global var that handles allocation of fids
   ufile->fid = global_fid;
   global_fid++;
   //add the file_helper struct to the list of file_helpers in the current thread
   struct thread * tc = thread_current();
   list_push_back (&tc->owned_files, &ufile->elem);
-  //lock_release (&flock);
-  //printf("\nfile pushed onto thread\n");
+
+  soft_release ();
 
   return ufile->fid;
 }
@@ -296,14 +302,10 @@ filesize (int fd)
   struct file_helper *ufile;	
   int size = -1;
   ufile = get_file (fd);
-  if (ufile == NULL)
-  {
-    return -1;
-  }
 
-  //lock_acquire (&flock);
+  soft_lock ();
   size = file_length (ufile->file);
-  //lock_release (&flock);
+  soft_release ();
 
   return size;
 }
@@ -311,17 +313,18 @@ filesize (int fd)
 static int
 read (int fd, void *buffer, unsigned length)
 {
+  //check buffer+len eventualy
   if (!safe_ptr(buffer))
      exit (-1); 
   struct file_helper *ufile;
   int read_status = -1;
+  soft_lock ();
 
-  //lock_acquire (&flock);
   //if stdin use getc
   if (fd == STDIN_FILENO)
     {
       int i;
-      for (i = 0; i < length; ++i)
+      for (i = 0; i < length; i++)
       {
         *(unsigned char *)(buffer + i) = input_getc ();
       }
@@ -333,19 +336,20 @@ read (int fd, void *buffer, unsigned length)
   //check if entire memory length is in userspace
   else if ( !is_user_vaddr (buffer) || !is_user_vaddr (buffer + length) )
     {
-      //lock_release (&flock);
+      soft_release ();
       exit (-1);
     }
   //file case
   else
     {
       ufile = get_file (fd);
+      //shouldnt even get here ?
       if (ufile == NULL)
         read_status = -1;
       else
         read_status = file_read (ufile->file, buffer, length);
     }
-  //lock_release (&flock);
+  soft_release ();
 
   return read_status;
 }
@@ -353,42 +357,31 @@ read (int fd, void *buffer, unsigned length)
 static int
 write (int fd, const void *buffer, unsigned length)
 {
-  if (!safe_ptr(buffer))
+  //printf("\nwrite fd: %d\n",fd);
+
+  if (!safe_ptr(buffer) || !safe_ptr(buffer+length))
      exit (-1); 
+  
+  //can't write on stdin
+  if (fd == STDIN_FILENO)
+    exit (-1);
+
   struct file_helper *ufile;
   int write_status = -1;
 
-  //printf("fd: %d,    length: %d \n",fd,length);
-  //lock_acquire (&flock);
-  if (fd == STDIN_FILENO)
-  {
-    write_status = -1;
-  }
-  else if (fd == STDOUT_FILENO)
+  if (fd == STDOUT_FILENO)
     {
       putbuf (buffer, length);
       write_status = length;
     }
   //file writecase
-  else if ( !is_user_vaddr (buffer) || !is_user_vaddr (buffer + length) )
-    {
-      //printf("?\n");
-      //lock_release (&flock);
-      exit (-1);
-    }
   else
     {
-     ufile = get_file (fd);
-      if (ufile == NULL)
-      {
-        write_status = -1;
-      }
-      else
-      {
-        write_status = file_write (ufile->file, buffer, length);
-      }
+       soft_lock ();
+       ufile = get_file (fd);
+       write_status = file_write (ufile->file, buffer, length);
+       soft_release ();
     }
-  //lock_release (&flock);
 
   return write_status;
 }
@@ -402,9 +395,9 @@ seek (int fd, unsigned position)
   if (!ufile)
     exit (-1);
 
-  //lock_acquire (&flock);
+  soft_lock ();
   file_seek (ufile->file, position);
-  //lock_release (&flock);
+  soft_release ();
 }
 
 static unsigned
@@ -419,9 +412,9 @@ tell (int fd)
   {
     exit (-1);
   }
-  //lock_acquire (&flock);
+  soft_lock ();
   tell_status = file_tell (ufile->file);
-  //lock_release (&flock);
+  soft_release ();
 
   return tell_status;
 }
@@ -429,19 +422,15 @@ tell (int fd)
 static void
 close (int fd)
 {
-  struct file_helper *ufile;
+  soft_lock ();
 
+  struct file_helper *ufile;
   ufile = get_file (fd);
 
-  if (ufile == NULL)
-    exit (-1);
-
-  //printf("\nclose beg %d \n",fd);
-  //lock_acquire (&flock);
   list_remove (&ufile -> elem);
   file_close (ufile -> file);
   free (ufile);
-  //lock_release (&flock);
+  soft_release ();
 }
 
 static struct file_helper *
@@ -451,14 +440,15 @@ get_file (int fid)
   struct thread *t;
 
   t = thread_current();
-  //printf("am i dead yet\n");
   for (e = list_begin (&t->owned_files); e != list_end (&t->owned_files); e = list_next (e))
     {
       struct file_helper *fh = list_entry (e, struct file_helper, elem);
       if (fh->fid == fid)
         return fh;
     }
-  return NULL;
+  //get_file about to return NULL, abandon ship
+  soft_release ();
+  exit (-1);
 }
 
 
