@@ -473,8 +473,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   //for userprog
+  #ifdef USERPROG
   list_init(&t->owned_files);
   list_init(&t->children);
+  #endif
 
 
   t->magic = THREAD_MAGIC;

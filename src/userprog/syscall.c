@@ -1,7 +1,5 @@
-//cleanup
 #include "userprog/syscall.h"
 #include "userprog/process.h"
-#include <syscall-nr.h>
 #include "devices/shutdown.h"
 #include "devices/input.h"
 #include "threads/interrupt.h"
@@ -28,7 +26,7 @@ static int get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
 static int read_address (const void * address);
 static void halt (void);
-static void exit (int status);
+//exit moved; needed  non static for exception.c
 static pid_t exec (const char *cmd_line);
 static int wait (pid_t pid);
 static bool create (const char *file, unsigned initial_size);
@@ -72,7 +70,6 @@ syscall_handler (struct intr_frame *frame)
 {
 
   int syscall = read_address (frame -> esp);
-  //printf("\nsyscall: %d\n", syscall);
   
   if (syscall == SYS_HALT)
   {
@@ -134,7 +131,6 @@ syscall_handler (struct intr_frame *frame)
   }
   else 
   {
-    //printf("not a system call: what a disaster");
     thread_exit ();
   }
 }
@@ -163,7 +159,6 @@ exit (int status)
   {
     f = list_begin (&(t->owned_files));
     fid_t fd = (list_entry (f, struct file_helper, elem))-> fid;
-    //printf("close %d\n",fd);
     close (fd); 
   }
 
@@ -217,7 +212,7 @@ static pid_t
 exec (const char *cmd_line)
 {
   if (!safe_ptr(cmd_line))
-     return (-1); 
+     return -1; 
   soft_lock ();
   int exec_status  = process_execute (cmd_line);
   soft_release ();
@@ -267,7 +262,6 @@ open (const char *file)
   //file DNE case
   if (file_o == NULL)
   {
-    //printf("hello\n");
     soft_release ();
     return -1;
   }
@@ -280,7 +274,6 @@ open (const char *file)
       soft_release ();
       return -1;
   }
-  //printf("HOW, %s", file);
 
   //setup file_helper and push onto thread's list of owned files
   ufile->file = file_o;
@@ -313,12 +306,15 @@ filesize (int fd)
 static int
 read (int fd, void *buffer, unsigned length)
 {
-  //check buffer+len eventualy
-  if (!safe_ptr(buffer))
+  //can't read from stdout
+  if (fd == STDOUT_FILENO)
+    exit(-1);
+
+  if (!safe_ptr(buffer) || !safe_ptr(buffer+length))
      exit (-1); 
+
   struct file_helper *ufile;
   int read_status = -1;
-  soft_lock ();
 
   //if stdin use getc
   if (fd == STDIN_FILENO)
@@ -330,26 +326,14 @@ read (int fd, void *buffer, unsigned length)
       }
       read_status = length;
     }
-  //can't read from stdout
-  else if (fd == STDOUT_FILENO)
-    read_status = -1;
-  //check if entire memory length is in userspace
-  else if ( !is_user_vaddr (buffer) || !is_user_vaddr (buffer + length) )
-    {
-      soft_release ();
-      exit (-1);
-    }
   //file case
   else
     {
+      soft_lock ();
       ufile = get_file (fd);
-      //shouldnt even get here ?
-      if (ufile == NULL)
-        read_status = -1;
-      else
-        read_status = file_read (ufile->file, buffer, length);
+      read_status = file_read (ufile->file, buffer, length);
+      soft_release ();
     }
-  soft_release ();
 
   return read_status;
 }
@@ -357,14 +341,11 @@ read (int fd, void *buffer, unsigned length)
 static int
 write (int fd, const void *buffer, unsigned length)
 {
-  //printf("\nwrite fd: %d\n",fd);
-
-  if (!safe_ptr(buffer) || !safe_ptr(buffer+length))
-     exit (-1); 
-  
   //can't write on stdin
   if (fd == STDIN_FILENO)
-    exit (-1);
+     exit (0);
+  if (!safe_ptr(buffer) || !safe_ptr(buffer+length))
+     exit (-1); 
 
   struct file_helper *ufile;
   int write_status = -1;
@@ -455,8 +436,6 @@ get_file (int fid)
 //read 4 bytes from memory
 //returns error if not from userspace
 //uses get_user to read a single byte and appropiately logical shifts and ORs bits together to create a 4byte return value
-//
-//NEEDS TO BE BUG TESTED, bits might be in backwards order
 static int
 read_address(const void * address) {
   if (!safe_ptr(address))
@@ -515,17 +494,17 @@ static bool
 safe_ptr (const void *p)
 {
   struct thread *ct = thread_current();
-  if (p == NULL  ||
-      !is_user_vaddr (p) ||
-      pagedir_get_page (ct -> pagedir, p) == NULL
+  if (p != NULL && 
+      p < PHYS_BASE &&
+      pagedir_get_page (ct -> pagedir, p) != NULL 
      )
+  {
+    return true;
+  }
+  else
   {
     //redundantly going to exit in caller functions as well for safety
     exit (-1);
     return false;
-  }
-  else
-  {
-    return true;
   }
 }

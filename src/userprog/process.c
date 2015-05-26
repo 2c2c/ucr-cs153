@@ -595,7 +595,6 @@ setup_stack (void **esp, const char *cmd_line)
       if (success)
       {
         return setup_stack_helper(cmd_line, kpage, ((uint8_t *) PHYS_BASE) - PGSIZE, esp);
-        //*esp = PHYS_BASE;
       }
       else
         palloc_free_page (kpage);
@@ -673,11 +672,11 @@ setup_stack_helper (const char * cmd_line, uint8_t * kpage, uint8_t * upage, voi
   {
     return false;
   }
-  char * token = strtok_r (cmd_copy, " ", &strtok_holder);
+  char *token = strtok_r (cmd_copy, " ", &strtok_holder);
   while (token != NULL)
   {
-    void *cur_uarg = upage + (token - (char *) kpage);
-    if (push (kpage, &ofs, &cur_uarg, sizeof (cur_uarg)) == NULL)
+    void *current = upage + (token - (char *) kpage);
+    if (push (kpage, &ofs, &current, sizeof (current)) == NULL)
     {
       return false;
     }

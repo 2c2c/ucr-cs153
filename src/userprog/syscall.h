@@ -1,6 +1,5 @@
 #ifndef USERPROG_SYSCALL_H
 #define USERPROG_SYSCALL_H
-//cleanup
 #include "userprog/syscall.h"
 #include "userprog/process.h"
 #include <stdio.h>
@@ -21,6 +20,7 @@
 #include <list.h> 
 
 void syscall_init (void);
+void exit (int status);
 
 
 
