@@ -1,0 +1,303 @@
++--------------------------+
+|       CS 153             |
+| PROJECT 2: USER PROGRAMS |
+| DESIGN DOCUMENT          |
++--------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Viet Nguyen <vnguy057@ucr.edu>
+Craig Collier <ccoll010@ucr.edu>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+                           ARGUMENT PASSING
+                           ================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+in process.c:
+
+static struct semaphore sema;
+
+used for synchronization in proc_wait
+
+
+
+in thread.h:
+
+struct 
+file_helper 
+{
+  struct file *file;
+  tid_t fid;
+  struct list_elem elem;
+};
+
+file_helper helps pass around files in terms of an int (fid), rather than passing the actual file object everywhere.
+
+
+struct
+child
+{
+  tid_t pid;
+  bool is_waiting;
+  bool is_fin;
+  int return_value;
+  struct list_elem elem;
+};
+
+child gives status information on a child thread. in particular process_wait needs to know whether a child has already been told to wait or if its finished.
+
+it also carries its tid/pid (which helps clarify ownership) and its return value
+
+struct thread{
+    tid_t parent_tid;
+    int loaded;
+    struct file *bin;
+    struct list children;
+    struct list owned_files;
+};
+
+the thread struct got additional members to interact with the two new structs. the bin member also carries the process
+
+
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+>> How do you avoid overflowing the stack page?
+
+You follow the structure described here
+http://www.cs.ucr.edu/~jfrea001/S15/doc/pintos_3.html#SEC51
+
+
+From right to left, scan the input line. each argument gets pushed onto the stack so that by that popping them is effectively left-to-right order.
+Stack overflow is prevented by having reasonable constraints on the arguments. Meaning size constraints on the argument count and the length of each argument. A limit to something like 40 characters per argument and 40 arguments total would probably be suitable.
+
+---- RATIONALE ----
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+
+
+From ‘man strtok’:
+
+
+The strtok() function uses a static buffer while parsing, so it's not thread safe. Use strtok_r() if this matters to you. 
+
+>> A4: In Pintos, the kernel separates commands into a executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+
+
+The shell handling parsing rather than the kernel itself is advantageous for a lot of reasons. 
+
+
+Main reason number one would be security. Having some flaw/exploit in your code for command parsing at user level rather than kernel level means you’re saving yourself from kernel panics and may only have to deal with a program crash.
+
+
+The other is that it allows for more features. A shell is a more inviting project of code to add some new stuff into than a kernel. zsh (http://zsh.sourceforge.net/) and fish (http://fishshell.com/) are examples of innovation in this area that would never happen were command parsing to be kernel level code.
+
+
+
+
+
+________________
+
+
+
+
+
+                             SYSTEM CALLS
+                             ============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+
+
+in syscall.c:
+
+
+typedef int pid_t;
+typedef int fid_t;
+
+Each just clarify work involving a file id or proc/thread id.
+
+
+static fid_t global_fid = 2;
+
+When a file is loaded, the global_fid is applied to file_helper object which is added to a thread's list of them. global_fid is then incremented
+
+
+static struct lock flock;
+
+used for all synchronization in syscall.c
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+
+When a file gets opened, increment the static fdcount and apply it to the file struct. It doesn’t seem to serve any worthwhile advantage to make it any more complicated than this by having unique process fids. this id is effectively the mapping used for processes to access files without passing around the structs directly which would be much more costly than simple ints
+
+---- ALGORITHMS ----
+
+>> B3: Describe your code for reading and writing user data from the
+>> kernel.
+
+First thing to do is check input. An fd sent to read() should never be stdout (1) and write should never be stdin (0). If this occurs, or the buffer pointer is an invalid address, the program should close. The last special case would be if read/write were to have stdin/stdout (respectively) as their fd. these are the only non file inputs and require using input_getc/putbuf (respectively)
+
+
+The only option left (actually read/writing from files) involves reading/writing size bytes from the input buffer. returns the number of bytes read/written, 0 at eof, or -1 on error.
+
+
+
+
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  What is the least
+>> and the greatest possible number of inspections of the page table
+>> (e.g. calls to pagedir_get_page()) that might result?  What about
+>> for a system call that only copies 2 bytes of data?  Is there room
+>> for improvement in these numbers, and how much?
+
+For a full page of data copied from the user space into the kernal: 
+The minimum number of page table inspection is one because all the data is stored on a single pre-allocated page in the best case scenario. 
+The greatest possible number of inspections is 4,096 because the data is stored on different pages. 
+
+
+For two bytes of data copied from the user space into the kernal:
+The minimum number of page table inspection is one and the maximum number of page table inspection is 4 for the reasons stated above.
+
+
+Improvement can be made by ...
+
+>> B5: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+
+check if child process creation was successful (does the input pid equal piderror)
+
+
+compare input pid to current program’s child process list, if it doesn’t exist return -1, if it has already returned, return its exit status and remove from child thread list.
+Otherwise if it is still running set its wait status to on. when it finishes it unblocks parent and gives it the child exit status.
+
+>> B6: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> paragraphs, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+
+
+Code should be neat and functional with each syscall function call being its own separate function. The arguments sent to these syscall functions should be checked in usermode to ensure they’re safe to present to the kernel.
+
+
+exit() should free all resources/blocks/etc. on calling program.
+
+---- SYNCHRONIZATION ----
+
+>> B7: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+
+
+Synchronization between the parent and its child threads has to be ensured:
+
+
+When a child thread gets made, semaphore down. When it ends, semaphore up. If there’s an error in the child thread, error code is set before releasing semaphore. This should handle all cases.
+
+>> B8: Consider parent process P with child process C.  How do you
+>> ensure proper synchronization and avoid race conditions when P
+>> calls wait(C) before C exits?  After C exits?  How do you ensure
+>> that all resources are freed in each case?  How about when P
+>> terminates without waiting, before C exits?  After C exits?  Are
+>> there any special cases?
+
+
+>  P calls wait(C) before C exits? After C exits?
+Before: P blocks until C returns, P is unblocked
+After: C shouldn’t even be on P’s child list at this point
+
+
+> that all resources are freed in each case?
+Kernel and P will release C’s resources when it is safe to do so through semaphore system
+
+
+> P terminates without waiting, before C exits? After C exits?
+If P returns before C, C gets orphaned to main(). If C returns before P you get the situation above
+
+
+> any special cases?
+Semaphores should handle any bizarre ‘sametime’ thread endings and forcibly make one happen before the other such that there isn’t a catastrophe.
+
+---- RATIONALE ----
+
+>> B9: Why did you choose to implement access to user memory from the
+>> kernel in the way that you did?
+
+Check if the pointer is part of user address space, isn’t null, part of the thread’s pagedir. If all of these checks don’t fail it can head to kernel. 
+
+I ended up using the given get_user code from a misunderstanding and just implemented the exception code to deal with that decision anyways. that involved resetting the stack pointers %eip to %eax and resetting %eax.
+
+>> B10: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+
+
+mapping int based file descriptor to the file struct itself for constant speed access and a bit of memory overhead if we were to ever have a process opening a lot of files. There isn’t a sensible alternative to go with.
+
+>> B11: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+
+No intention of changing the mapping
+
+
+
+
+                           SURVEY QUESTIONS
+                           ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
