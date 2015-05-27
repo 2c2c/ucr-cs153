@@ -21,12 +21,9 @@
 #include "threads/synch.h"
 #include "threads/malloc.h"
 
-//for stack helper
-#define ARGV_DELIMIT " "
-#define MAX_ARGV 50
-
 //semaphore used EVERYWHERE in proc.c
 static struct semaphore sema;
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static void * push (uint8_t *kpage, size_t *ofs, const void *buf, size_t size);
@@ -64,7 +61,6 @@ process_execute (const char *cmd_line)
     char *strtok_holder;
     char *process_name = strtok_r(copy2, " ", &strtok_holder);
 
-    //printf("\nproc_exec: %s\n",process_name); 
 
     sema_init(&sema, 1);
     sema_down(&sema);
@@ -73,7 +69,6 @@ process_execute (const char *cmd_line)
     //tid returned in future child
     tid_t tid = thread_create (process_name, PRI_DEFAULT, start_process, copy);
     
-    //printf("\nproc_exec: %s\n",process_name); 
     sema_down(&sema);
     sema_up(&sema);
 
@@ -84,7 +79,6 @@ process_execute (const char *cmd_line)
       return -1;
     }
     
-    //printf("\nproc_exec: %s\n",process_name); 
     struct file *file = filesys_open (process_name);
     if (file == NULL)
      {
@@ -93,7 +87,6 @@ process_execute (const char *cmd_line)
     //built in file locks from filesys folder
     file_deny_write(file);
     
-    //printf("\nproc_exec: %s\n",process_name); 
     //setup child struct
     //completing then adding to curernt thread's children list
     child -> pid = tid;
@@ -107,7 +100,6 @@ process_execute (const char *cmd_line)
     child_thread -> bin = file;
     strlcpy(child_thread -> name, process_name, 16);
     
-    //printf("\nproc_exec: %s\n",process_name); 
     palloc_free_page (copy2);
     
     if (tid == TID_ERROR)
@@ -134,15 +126,14 @@ start_process (void *file_name_)
 
     success = load (process, &if_.eip, &if_.esp);
     
-    //printf("\nload: %d \n",success);
     //load () return value tells whether thread load was good or not
     thread_current () -> loaded = success;
     sema_up (&sema);
     intr_disable ();
     thread_block ();
     intr_enable ();
+    sema_down (&sema);
 
-    //printf("\nunblocks \n");
     //load () return value tells whether thread load was good or not
    //finished loading cmdline, cleanup
     palloc_free_page(0);
@@ -154,7 +145,6 @@ start_process (void *file_name_)
         thread_exit ();
     }
 
-    //printf("\nstart_proc end\n");
     /* Start the user process by simulating a return from an
        interrupt, implemented by intr_exit (in
        threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -177,27 +167,31 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid) 
 {
+
+  if (child_tid == TID_ERROR)
+     return TID_ERROR;
+
   struct thread *current_thread = thread_current ();
-  //allocate a generic list element, childthread element for iterating through all children of current_thread
+
   struct thread *ct = thread_current ();
   struct list_elem *e = list_begin (& (ct -> children));
   struct child *target;
   //iterate through the childthread list in current thread, stop when finding matching tid 
 
-  bool found = false;
+  bool child_found = false;
   while (e != list_end (&(ct->children)))
   {
     struct child *C = list_entry(e, struct child, elem);
     if (C->pid == child_tid)
     {
       target = C;
-      found = true;
+      child_found = true;
       break;
     }
     e = list_next (e);
   }
   // return -1 if entire for loop runs with no matching tid
-  if(!found)
+  if(!child_found)
   {
     return -1;
   }
@@ -218,17 +212,12 @@ process_wait (tid_t child_tid)
     int status = target -> return_value;
     palloc_free_page(target);
     return status;
-    }
-    //block till finished
-  else
-  {
-    intr_disable ();
-    thread_block ();
-    intr_enable ();
   }
-  //remove since guaranteed fin
+  intr_disable ();
+  thread_block ();
+  intr_enable ();
+  
   list_remove (&(target -> elem));
-  //palloc_free
   return target -> return_value;
 }
 
@@ -379,7 +368,7 @@ load (const char *cmd_line, void (**eip) (void), void **esp)
   file = filesys_open (program);
   if (file == NULL) 
   {
-      //printf ("load: %s: open failed\n", cmd_line);
+      printf ("load: %s: open failed\n", cmd_line);
       goto done; 
   }
   palloc_free_page(page);

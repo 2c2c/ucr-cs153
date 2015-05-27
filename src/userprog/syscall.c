@@ -70,7 +70,7 @@ syscall_handler (struct intr_frame *frame)
 {
 
   int syscall = read_address (frame -> esp);
-  
+  // printf("\ncurrent thread: %d syscal: %d\n",thread_current()->tid,syscall);
   if (syscall == SYS_HALT)
   {
     halt();
@@ -343,7 +343,7 @@ write (int fd, const void *buffer, unsigned length)
 {
   //can't write on stdin
   if (fd == STDIN_FILENO)
-     exit (0);
+     exit (-1);
   if (!safe_ptr(buffer) || !safe_ptr(buffer+length))
      exit (-1); 
 
@@ -351,18 +351,25 @@ write (int fd, const void *buffer, unsigned length)
   int write_status = -1;
 
   if (fd == STDOUT_FILENO)
-    {
-      putbuf (buffer, length);
-      write_status = length;
+  {
+    size_t offset = 0;
+    size_t block = 256;
+    while (block + offset < length)
+    { 
+      putbuf (buffer + offset, block);
+      offset+=block;
     }
+    putbuf(buffer+offset, length-offset);
+    return length;
+  }
   //file writecase
   else
-    {
+  {
        soft_lock ();
        ufile = get_file (fd);
        write_status = file_write (ufile->file, buffer, length);
        soft_release ();
-    }
+  }
 
   return write_status;
 }
@@ -373,8 +380,6 @@ seek (int fd, unsigned position)
   struct file_helper *ufile;
 
   ufile = get_file (fd);
-  if (!ufile)
-    exit (-1);
 
   soft_lock ();
   file_seek (ufile->file, position);
@@ -389,10 +394,7 @@ tell (int fd)
   unsigned int tell_status;
 
   ufile = get_file (fd);
-  if (!ufile)
-  {
-    exit (-1);
-  }
+
   soft_lock ();
   tell_status = file_tell (ufile->file);
   soft_release ();
@@ -408,6 +410,7 @@ close (int fd)
   struct file_helper *ufile;
   ufile = get_file (fd);
 
+  soft_lock ();
   list_remove (&ufile -> elem);
   file_close (ufile -> file);
   free (ufile);

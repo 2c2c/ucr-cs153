@@ -1,11 +1,10 @@
 make clean;
 make;
 cd ./build;
-make tests/userprog/bad-write.result;
-make tests/userprog/bad-read.result;
-clear;
-cat tests/userprog/bad-read.output;
-cat tests/userprog/bad-write.output;
+make tests/filesys/base/syn-read.result
+cat tests/filesys/base/syn-read.output
+make tests/filesys/base/syn-write.result
+cat tests/filesys/base/syn-write.output
 cd ..;
 
 
